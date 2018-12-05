@@ -31,15 +31,14 @@ import (
 
 var versionRegexp = regexp.MustCompile(`([0-9]+)\.([0-9]+)\.([0-9]+)`)
 
-// Contract contains information about a compiled contract, alongside its code and runtime code.
+// Contract contains information about a compiled contract, alongside its code.
 type Contract struct {
-	Code        string       `json:"code"`
-	RuntimeCode string       `json:"runtime-code"`
-	Info        ContractInfo `json:"info"`
+	Code string       `json:"code"`
+	Info ContractInfo `json:"info"`
 }
 
 // ContractInfo contains information about a compiled contract, including access
-// to the ABI definition, source mapping, user and developer docs, and metadata.
+// to the ABI definition, user and developer docs, and metadata.
 //
 // Depending on the source, language version, compiler version, and compiler
 // options will provide information about how the contract was compiled.
@@ -49,8 +48,6 @@ type ContractInfo struct {
 	LanguageVersion string      `json:"languageVersion"`
 	CompilerVersion string      `json:"compilerVersion"`
 	CompilerOptions string      `json:"compilerOptions"`
-	SrcMap          string      `json:"srcMap"`
-	SrcMapRuntime   string      `json:"srcMapRuntime"`
 	AbiDefinition   interface{} `json:"abiDefinition"`
 	UserDoc         interface{} `json:"userDoc"`
 	DeveloperDoc    interface{} `json:"developerDoc"`
@@ -66,16 +63,14 @@ type Solidity struct {
 // --combined-output format
 type solcOutput struct {
 	Contracts map[string]struct {
-		BinRuntime                                  string `json:"bin-runtime"`
-		SrcMapRuntime                               string `json:"srcmap-runtime"`
-		Bin, SrcMap, Abi, Devdoc, Userdoc, Metadata string
+		Bin, Abi, Devdoc, Userdoc, Metadata string
 	}
 	Version string
 }
 
 func (s *Solidity) makeArgs() []string {
 	p := []string{
-		"--combined-json", "bin,bin-runtime,srcmap,srcmap-runtime,abi,userdoc,devdoc",
+		"--combined-json", "bin,abi,userdoc,devdoc",
 		"--optimize", // code optimizer switched on
 	}
 	if s.Major > 0 || s.Minor > 4 || s.Patch > 6 {
@@ -114,7 +109,7 @@ func SolidityVersion(solc string) (*Solidity, error) {
 }
 
 // CompileSolidityString builds and returns all the contracts contained within a source string.
-func CompileSolidityString(solc, source string) (map[string]*Contract, error) {
+func CompileSolidityString(solc string, customArgs []string, source string) (map[string]*Contract, error) {
 	if len(source) == 0 {
 		return nil, errors.New("solc: empty source string")
 	}
@@ -122,14 +117,14 @@ func CompileSolidityString(solc, source string) (map[string]*Contract, error) {
 	if err != nil {
 		return nil, err
 	}
-	args := append(s.makeArgs(), "--")
+	args := append(s.makeArgs(), customArgs...)
 	cmd := exec.Command(s.Path, append(args, "-")...)
 	cmd.Stdin = strings.NewReader(source)
 	return s.run(cmd, source)
 }
 
 // CompileSolidity compiles all given Solidity source files.
-func CompileSolidity(solc string, sourcefiles ...string) (map[string]*Contract, error) {
+func CompileSolidity(solc string, customArgs []string, sourcefiles ...string) (map[string]*Contract, error) {
 	if len(sourcefiles) == 0 {
 		return nil, errors.New("solc: no source files")
 	}
@@ -141,7 +136,7 @@ func CompileSolidity(solc string, sourcefiles ...string) (map[string]*Contract, 
 	if err != nil {
 		return nil, err
 	}
-	args := append(s.makeArgs(), "--")
+	args := append(s.makeArgs(), customArgs...)
 	cmd := exec.Command(s.Path, append(args, sourcefiles...)...)
 	return s.run(cmd, source)
 }
@@ -162,7 +157,7 @@ func (s *Solidity) run(cmd *exec.Cmd, source string) (map[string]*Contract, erro
 // provided source, language and compiler version, and compiler options are all
 // passed through into the Contract structs.
 //
-// The solc output is expected to contain ABI, source mapping, user docs, and dev docs.
+// The solc output is expected to contain ABI, user docs, and dev docs.
 //
 // Returns an error if the JSON is malformed or missing data, or if the JSON
 // embedded within the JSON is malformed.
@@ -189,16 +184,13 @@ func ParseCombinedJSON(combinedJSON []byte, source string, languageVersion strin
 			return nil, fmt.Errorf("solc: error reading dev doc: %v", err)
 		}
 		contracts[name] = &Contract{
-			Code:        "0x" + info.Bin,
-			RuntimeCode: "0x" + info.BinRuntime,
+			Code: "0x" + info.Bin,
 			Info: ContractInfo{
 				Source:          source,
 				Language:        "Solidity",
 				LanguageVersion: languageVersion,
 				CompilerVersion: compilerVersion,
 				CompilerOptions: compilerOptions,
-				SrcMap:          info.SrcMap,
-				SrcMapRuntime:   info.SrcMapRuntime,
 				AbiDefinition:   abi,
 				UserDoc:         userdoc,
 				DeveloperDoc:    devdoc,
